@@ -266,7 +266,8 @@ class SP1Pipeline:
             
         # Return highest confidence detection
         return max(result.detections_3d, key=lambda d: d.confidence)
-    
+
+
     def get_waypoint(
         self,
         image: Union[str, np.ndarray, Image.Image],
@@ -275,23 +276,24 @@ class SP1Pipeline:
     ) -> Optional[Dict]:
         """
         Get a navigation waypoint to approach a target object.
-        
-        Args:
-            image: Input image
-            target_object: Object to approach
-            offset_distance: Distance to stop from object (meters)
-            
-        Returns:
-            Dict with waypoint coordinates, or None if object not found
         """
-        detection = self.detect_single_object(image, target_object)
+        # Run full detection with the target as a list
+        result = self.detect(image, [target_object])
         
-        if detection is None:
+        if not result.detections_3d:
             return None
+        
+        # Get highest confidence detection
+        detection = max(result.detections_3d, key=lambda d: d.confidence)
         
         # Calculate waypoint in front of object
         obj_pos = detection.center
-        direction = obj_pos / np.linalg.norm(obj_pos)  # Towards object
+        
+        # Handle zero position case
+        if np.linalg.norm(obj_pos) < 0.001:
+            return None
+            
+        direction = obj_pos / np.linalg.norm(obj_pos)
         waypoint = obj_pos - direction * offset_distance
         
         return {
@@ -300,8 +302,9 @@ class SP1Pipeline:
             "waypoint_position": waypoint.tolist(),
             "distance_to_object": float(np.linalg.norm(obj_pos)),
             "confidence": detection.confidence
-        }
+        } 
     
+
     def warmup(self, image_size: Tuple[int, int] = (640, 480), iterations: int = 3) -> None:
         """
         Warm up the pipeline with dummy inference.
