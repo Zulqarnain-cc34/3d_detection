@@ -1,0 +1,2002 @@
+### Executive Summary
+
+| Requirement | Proposed Strategy | Status |
+| :--- | :--- | :--- |
+| **I. Project Goal** | Semantic Navigation via core cognitive capabilities. | **Targeted.** The combined output of 3D Object Bounding Boxes and 3D Room Layout Mesh provides the complete data structure for a downstream Semantic Navigation module. |
+| **Constraint** | **RGB-Only Pipeline (No Depth/LiDAR).** | **Addressed.** Both sub-projects are built on a Monocular Vision (single RGB camera) deep learning and geometric projection stack. |
+| **Constraint** | **Deployment on Jetson Orin (8GB).** | **Addressed.** All chosen models/architectures are optimized using **NVIDIA TensorRT** for FP16/INT8 precision to achieve real-time performance on the target edge device. |
+| **Timeline** | **2 Months (Fully Deployable).** | The proposal is structured as a **Minimum Viable Deployment (MVD)** focusing *only* on the core deliverables for a successful hand-off. An optional Phase 2 for robustness is recommended. |
+
+---
+
+## Sub-Project 1: 3D Open-Vocabulary Object Detection (RGB-Only)
+
+### I. Objectives
+
+*   **Core:** To generate a 3D bounding box (location, dimensions, and orientation) for any user-queried object (open-vocabulary) from a single RGB camera stream.
+*   **Metric:** Real-time inference on the Jetson Orin 8GB.
+*   **Output:** A Python API function that accepts an RGB image and a text prompt (e.g., "blue chair," "remote control") and returns a list of 3D object poses/boxes in a local camera frame.
+
+### II. Strategy: 2D Open-Vocabulary -> Monocular Depth -> 3D Projection
+
+| Stage | Strategy | Rationale (Why this strategy?) |
+| :--- | :--- | :--- |
+| **A. Open-Vocabulary 2D Detection** | Use a highly efficient, pre-trained Vision-Language Model backbone like **YOLO-World-N (object detection + generalized conceptual knowledge of a Large Language Model)** | This models provide state-of-the-art open-vocabulary detection and are designed for speed, often outperforming traditional methods. YOLO-World, in particular, is highly suitable for real-time edge deployment. |
+| **B. Monocular Depth Estimation** | Use a lightweight, single-image Monocular Depth Estimation (MDE) network **Depth Anything V2 (Fine-tuned for Metric Depth Estimation)**. It gives you the Z coordinate (depth) for every point. | This directly addresses the **RGB-Only** constraint by synthetically generating the necessary depth. |
+| **C. 3D Pose Estimation** | Triangulate the 2D bounding box (from Stage A) with the estimated depth (from Stage B) and the known camera intrinsics (Calibration Task). A PnP (Perspective-n-Point) solver or a similar geometric projection method will generate the final 3D bounding box coordinates and orientation. **Stage C is where the raw data (depth map + 2D box) is structured into a complete 3D Bounding Box.** | This converts the 2D semantic information into the required 3D spatial coordinates, completing the core deliverable: ready for the navigation system. |
+
+### III. Milestones and Tasks
+
+| Milestone | Deliverables (Output) | Task Breakdown | Timeline (Weeks) |
+| :--- | :--- | :--- | :--- |
+| **M1: Technical Feasibility Study (SP1)** | Status of Core models (**YOLO-World-N**, **MDE**) and their suitability for the Orin confirmation. **(Validation of Core Strategy)** | Select, acquire, and **validate base models** for architectural compatibility and conceptual accuracy on test data. Basically how technically feasible it is. | **Weeks 1-2** |
+| **M2: Camera Calibration & Depth Refinement** | Camera Intrinsics determined and Metric Depth Estimation (MDE) refined. | Implement 3D geometric projection (PnP solver/triangulation) and 3D bounding box fitting logic Perform Camera Calibration (Intrinsics) and establish the local camera coordinate frame. | **Weeks 3-4** |
+| **M3: 3D Geometric Projection & Unoptimized API** | Unoptimized Python API for Monocular 3D Detection | T3.1: Integrate the 2D Detector, MDE, and 3D Projection into a single Python pipeline for end-to-end functionality. | **Weeks 5-6** |
+| **M4: Orin Deployment & Final Test** | **Fully Deployable Python API (TensorRT Optimized) for SP1.** | T4.1: Convert all models (2D Detector, MDE) to ONNX format. T4.2: Optimize models for Jetson Orin using NVIDIA TensorRT (FP16/INT8). T4.3: Final latency/accuracy testing on the physical Jetson Orin 8GB device and SP1 documentation. | **Weeks 7-8** |
+
+---
+
+## Sub-Project 2: 3D Room Layout Estimation (RGB-Only)
+
+### I. Objectives
+
+*   **Core:** To reconstruct the structural elements of a room (walls, floor, ceiling, corners, openings/doors) into a simplified 3D mesh model, functionally similar to Apple's **RoomPlan**.
+*   **Metric:** Real-time layout update on the Jetson Orin 8GB.
+*   **Output:** A Python API function that accepts an RGB image and returns a parameterized 3D room layout structure (e.g., a dictionary of 3D vertices/planes).
+
+### II. Strategy: Single-Image Layout -> Geometric Constraints -> Optimization
+
+| Stage | Strategy | Rationale (Why this strategy?) |
+| :--- | :--- | :--- |
+| **A. 2D Structural Prediction** | Use a lightweight, end-to-end **FCNN/Transformer architecture** like **ST-RoomNet (ConvNext-Lite Backbone)**. This model is known for high-speed, direct prediction of perspective transformation parameters or key points from a single RGB image. | This model is an efficient, state-of-the-art CNN-based approach that is demonstrably capable of running (without TensorRT) on similar hardware, directly addressing the **RGB-Only** and **Real-Time** constraints for edge deployment. |
+| **B. 3D Model Generation** | The network's 2D predictions (e.g., keypoints, boundary masks, or transformation parameters) are fed into a **constrained non-linear optimization** layer. This layer enforces **Manhattan World** assumptions **(Note: Assumes orthogonal walls and structural alignment along three perpendicular axes)** and geometric consistency. | This is the crucial step that generates the parameterized, clean 3D output (the "RoomPlan-like" feature) from the initial pixel-level/parameter predictions, converting the 2D semantics into a geometrically sound 3D mesh. |
+| **C. Layout Refinement for Openings** | Incorporate a secondary, lightweight segmentation network based on an **FCN/MobileNetV2** backbone using **pre-trained weights from the ADE20K** semantic segmentation dataset. This provides pixel-accurate masks for the classes **'door'** and **'window'**. | This strategy leverages a confirmed, publicly available, and highly efficient semantic segmentation model architecture known for ADE20K training. It eliminates the need for custom fine-tuning (reducing MVD risk) and provides pixel-accurate masks, which are superior for clean geometric cut-outs in the 3D mesh. |
+
+### III. Milestones and Tasks
+
+| Milestone | Deliverables (Output) | Task Breakdown | Timeline (Weeks) |
+| :--- | :--- | :--- | :--- |
+| **M5: Technical Feasibility Study (SP2)** | Core Layout Network FCNN/Transformer architecture. **(Validation of 2D-to-3D Layout Approach)** | T5.1: Validate the feasibility of the model. | **Weeks 1-2** |
+| **M6: 3D Core Layout Pipeline** | Functional 2D-to-3D Layout Generator (Base Room Mesh, No Openings). | T6.1: Implement the 3D non-linear optimization/fitting module (Manhattan World logic). T6.2: Integrate the 2D prediction (M5) with the 3D logic. | **Weeks 3-4** |
+| **M7: Openings Integration & Full API** | Unoptimized Python API for 3D Room Layout (Mesh/Corner output) including openings. | **T7.1: Acquire pre-trained FCN/MobileNetV2 (ADE20K) model weights.** **T7.2: Integrate semantic segmentation output (pixel mask) into the 3D optimization for clean "cut-outs."** T7.3: Ensure a clean, structured output (e.g., a dictionary of 3D vertices/planes). | **Weeks 5-6** |
+| **M8: Orin Deployment & Finalization** | **Fully Deployable Python API (TensorRT Optimized) for SP2 & Full System Integration.** | T8.1: Convert all models to ONNX format. T8.2: Optimize models for Jetson Orin using NVIDIA TensorRT (FP16). T8.3: Final System Integration Test (Object Detection + Layout) and final documentation/handover. | **Weeks 7-8** |
+
+---
+
+## IV. How the Two Sub-Projects Connect
+
+In simple terms, these two parallel systems create a comprehensive digital representation of the world by defining a map and then populating that map with targets.
+
+1.  **Sub-Project 2 (Room Layout)** is the **Container (The Map):** It uses the RGB image to build the unmoving, structural framework of the environment—the 3D walls, floor, ceiling, and the essential doors for passing through. This provides the stable, global coordinate system and defines the *traversable space*.
+
+2.  **Sub-Project 1 (Object Detection)** is the **Content (The Targets):** It uses the same RGB image and a user prompt to find the specific, searchable items inside that framework (e.g., "remote control," "blue chair").
+
+3.  **The Connection (Registration):** The final step is to precisely place the 3D locations of the objects (SP1 output) *inside* the 3D mesh of the room structure (SP2 output). This fusion allows the final Semantic Navigation module to accurately plan a path through the SP2 map *to* a specific object found by SP1.
+
+requirements.txt
+
+# SP1 3D Object Detection Pipeline - Requirements
+# Target: Jetson Orin 8GB / Desktop with GPU
+
+# Core ML frameworks
+torch>=2.0.0
+torchvision>=0.15.0
+
+# YOLO-World for open-vocabulary detection
+ultralytics>=8.0.0
+
+# Depth Anything V2 via Hugging Face
+transformers>=4.30.0
+huggingface-hub>=0.20.0
+
+# Image processing
+pillow>=9.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# Visualization
+matplotlib>=3.7.0
+supervision>=0.16.0
+
+# Configuration
+pyyaml>=6.0
+
+# HTTP requests for downloading test images
+requests>=2.28.0
+
+# Optional: For Jupyter notebook support
+# jupyter>=1.0.0
+# ipywidgets>=8.0.0
+
+# Optional: For TensorRT optimization (Jetson deployment)
+# tensorrt>=8.6.0
+# onnx>=1.14.0
+# onnxruntime-gpu>=1.15.0
+
+# Optional: For advanced 3D visualization
+# open3d>=0.17.0
+# plotly>=5.15.0
+
+configs/config.yaml
+
+# Sub-Project 1: 3D Open-Vocabulary Object Detection Configuration
+# Target: Jetson Orin 8GB (RGB-Only Pipeline)
+
+pipeline:
+  name: "SP1_3D_Object_Detection"
+  version: "1.0.0"
+  description: "RGB-Only 3D Open-Vocabulary Object Detection Pipeline"
+
+# Stage A: Open-Vocabulary 2D Detection
+detector:
+  model_name: "yolov8s-world"  # Options: yolov8n-world, yolov8s-world, yolov8m-world
+  confidence_threshold: 0.25
+  iou_threshold: 0.45
+  device: "cpu"  # Change to "cuda:0" for GPU, "cpu" for CPU-only
+  
+# Stage B: Monocular Depth Estimation  
+depth_estimator:
+  model_name: "depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf"
+  # Alternative indoor model: "depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf"
+  depth_range:
+    min_depth: 0.5   # meters
+    max_depth: 10.0  # meters
+  use_metric_depth: true
+
+# Stage C: 3D Projection
+projection:
+  # Default camera intrinsics (override with calibration)
+  camera:
+    fx: 525.0  # focal length x (pixels)
+    fy: 525.0  # focal length y (pixels)
+    cx: 320.0  # principal point x (pixels)
+    cy: 240.0  # principal point y (pixels)
+    width: 640
+    height: 480
+  
+  # 3D bounding box estimation method
+  bbox_estimation:
+    method: "depth_sampling"  # Options: center_point, depth_sampling, point_cloud
+    sampling_points: 100
+    use_median: true
+
+# Evaluation settings
+evaluation:
+  metrics:
+    - "detection_accuracy"
+    - "depth_mae"
+    - "depth_rmse"
+    - "3d_iou"
+    - "inference_time"
+  
+  # Benchmark datasets
+  benchmarks:
+    - name: "custom_indoor"
+      path: "./data/test_images/"
+    
+# Output settings
+output:
+  save_visualizations: true
+  save_detections_json: true
+  visualization_dpi: 150
+  output_dir: "./outputs/"
+
+# Performance optimization (for Jetson deployment)
+optimization:
+  tensorrt:
+    enabled: false  # Enable for Jetson deployment
+    precision: "fp16"  # Options: fp32, fp16, int8
+  
+  batch_size: 1
+  warmup_iterations: 3
+
+
+src/__init__.py
+
+"""
+SP1: 3D Open-Vocabulary Object Detection Pipeline
+
+RGB-Only pipeline for semantic 3D object detection in indoor environments.
+Designed for deployment on Jetson Orin 8GB.
+
+Pipeline Stages:
+    A. Open-Vocabulary 2D Detection (YOLO-World)
+    B. Monocular Depth Estimation (Depth Anything V2)
+    C. 3D Geometric Projection
+
+Usage:
+    from src import SP1Pipeline
+    
+    pipeline = SP1Pipeline(device='cuda:0')
+    result = pipeline.detect('image.jpg', classes=['chair', 'table', 'cup'])
+    print(result.summary())
+"""
+
+from src.pipeline import SP1Pipeline, PipelineResult
+from src.detector import OpenVocabDetector, Detection2D
+from src.depth_estimator import MonocularDepthEstimator, DepthResult
+from src.projector import Projector3D, BoundingBox3D, CameraIntrinsics
+from src.visualizer import PipelineVisualizer, quick_visualize
+from src.evaluation import PipelineEvaluator, EvaluationResult
+
+__version__ = "1.0.0"
+__author__ = "SP1 Development Team"
+
+__all__ = [
+    # Main pipeline
+    "SP1Pipeline",
+    "PipelineResult",
+    
+    # Stage A: Detection
+    "OpenVocabDetector",
+    "Detection2D",
+    
+    # Stage B: Depth
+    "MonocularDepthEstimator", 
+    "DepthResult",
+    
+    # Stage C: Projection
+    "Projector3D",
+    "BoundingBox3D",
+    "CameraIntrinsics",
+    
+    # Utilities
+    "PipelineVisualizer",
+    "quick_visualize",
+    "PipelineEvaluator",
+    "EvaluationResult",
+]
+
+src/depth_estimator.py
+
+"""
+Stage B: Monocular Depth Estimation
+Uses Depth Anything V2 for metric depth estimation from single RGB images.
+"""
+
+import numpy as np
+from typing import Dict, Tuple, Optional
+from dataclasses import dataclass
+from PIL import Image
+import time
+
+
+@dataclass
+class DepthResult:
+    """Container for depth estimation results."""
+    depth_map: np.ndarray  # 2D array of depth values in meters
+    min_depth: float
+    max_depth: float
+    mean_depth: float
+    inference_time_ms: float
+    
+    def get_depth_at_point(self, x: int, y: int) -> float:
+        """Get depth value at a specific pixel coordinate."""
+        h, w = self.depth_map.shape
+        x = np.clip(x, 0, w - 1)
+        y = np.clip(y, 0, h - 1)
+        return float(self.depth_map[y, x])
+    
+    def get_depth_in_region(
+        self,
+        x1: int, y1: int, x2: int, y2: int,
+        method: str = "median"
+    ) -> float:
+        """
+        Get depth value for a bounding box region.
+        
+        Args:
+            x1, y1, x2, y2: Bounding box coordinates
+            method: Aggregation method ('median', 'mean', 'center', 'min')
+        """
+        h, w = self.depth_map.shape
+        x1, x2 = np.clip([x1, x2], 0, w - 1)
+        y1, y2 = np.clip([y1, y2], 0, h - 1)
+        
+        region = self.depth_map[int(y1):int(y2), int(x1):int(x2)]
+        
+        if region.size == 0:
+            return 0.0
+            
+        if method == "median":
+            return float(np.median(region))
+        elif method == "mean":
+            return float(np.mean(region))
+        elif method == "center":
+            cy, cx = region.shape[0] // 2, region.shape[1] // 2
+            return float(region[cy, cx])
+        elif method == "min":
+            return float(np.min(region))
+        else:
+            raise ValueError(f"Unknown method: {method}")
+
+
+class MonocularDepthEstimator:
+    """
+    Stage B: Monocular Depth Estimation using Depth Anything V2.
+    
+    Estimates metric depth from single RGB images.
+    """
+    
+    SUPPORTED_MODELS = {
+        "outdoor_small": "depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf",
+        "outdoor_base": "depth-anything/Depth-Anything-V2-Metric-Outdoor-Base-hf",
+        "indoor_small": "depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf",
+        "indoor_base": "depth-anything/Depth-Anything-V2-Metric-Indoor-Base-hf",
+    }
+    
+    def __init__(
+        self,
+        model_name: str = "depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf",
+        min_depth: float = 0.5,
+        max_depth: float = 10.0,
+        device: str = "cpu"
+    ):
+        """
+        Initialize the depth estimator.
+        
+        Args:
+            model_name: Hugging Face model name or key from SUPPORTED_MODELS
+            min_depth: Minimum expected depth in meters
+            max_depth: Maximum expected depth in meters
+            device: Device to run inference on
+        """
+        from transformers import pipeline
+        
+        # Resolve model name
+        if model_name in self.SUPPORTED_MODELS:
+            model_name = self.SUPPORTED_MODELS[model_name]
+            
+        self.model_name = model_name
+        self.min_depth = min_depth
+        self.max_depth = max_depth
+        self.device = device
+        
+        print(f"[Stage B] Loading {model_name}...")
+        self.pipe = pipeline(
+            task="depth-estimation",
+            model=model_name,
+            device=0 if "cuda" in device else -1
+        )
+        print(f"[Stage B] Model loaded successfully")
+        
+    def estimate_depth(
+        self,
+        image: np.ndarray,
+        normalize_to_metric: bool = True
+    ) -> DepthResult:
+        """
+        Estimate depth from a single RGB image.
+        
+        Args:
+            image: Input image (RGB, numpy array or PIL Image)
+            normalize_to_metric: If True, normalize depth to metric range
+            
+        Returns:
+            DepthResult containing the depth map and statistics
+        """
+        # Convert to PIL if needed
+        if isinstance(image, np.ndarray):
+            pil_image = Image.fromarray(image)
+        else:
+            pil_image = image
+            
+        # Run inference
+        start_time = time.perf_counter()
+        result = self.pipe(pil_image)
+        inference_time = (time.perf_counter() - start_time) * 1000
+        
+        # Get raw depth
+        depth_raw = np.array(result["depth"])
+        
+        # Normalize to metric range if requested
+        if normalize_to_metric:
+            depth_normalized = (depth_raw - depth_raw.min()) / (depth_raw.max() - depth_raw.min() + 1e-8)
+            depth_map = self.min_depth + depth_normalized * (self.max_depth - self.min_depth)
+        else:
+            depth_map = depth_raw.astype(np.float32)
+        
+        # Resize to match input image if needed
+        target_h, target_w = (pil_image.size[1], pil_image.size[0])
+        if depth_map.shape != (target_h, target_w):
+            depth_pil = Image.fromarray(depth_map.astype(np.float32))
+            depth_pil = depth_pil.resize((target_w, target_h), Image.BILINEAR)
+            depth_map = np.array(depth_pil)
+        
+        return DepthResult(
+            depth_map=depth_map,
+            min_depth=float(depth_map.min()),
+            max_depth=float(depth_map.max()),
+            mean_depth=float(depth_map.mean()),
+            inference_time_ms=inference_time
+        )
+    
+    def get_model_info(self) -> Dict:
+        """Get information about the loaded model."""
+        return {
+            "model_name": self.model_name,
+            "device": self.device,
+            "depth_range": (self.min_depth, self.max_depth)
+        }
+
+
+class DepthMapVisualizer:
+    """Utilities for visualizing depth maps."""
+    
+    @staticmethod
+    def to_colormap(
+        depth_map: np.ndarray,
+        colormap: str = "plasma",
+        min_depth: Optional[float] = None,
+        max_depth: Optional[float] = None
+    ) -> np.ndarray:
+        """
+        Convert depth map to a colored visualization.
+        
+        Args:
+            depth_map: 2D depth array
+            colormap: Matplotlib colormap name
+            min_depth: Minimum depth for normalization
+            max_depth: Maximum depth for normalization
+            
+        Returns:
+            RGB image (H, W, 3) uint8
+        """
+        import matplotlib.pyplot as plt
+        
+        if min_depth is None:
+            min_depth = depth_map.min()
+        if max_depth is None:
+            max_depth = depth_map.max()
+            
+        normalized = (depth_map - min_depth) / (max_depth - min_depth + 1e-8)
+        normalized = np.clip(normalized, 0, 1)
+        
+        cmap = plt.get_cmap(colormap)
+        colored = cmap(normalized)[:, :, :3]  # Remove alpha channel
+        return (colored * 255).astype(np.uint8)
+    
+    @staticmethod
+    def overlay_depth_on_image(
+        image: np.ndarray,
+        depth_map: np.ndarray,
+        alpha: float = 0.5,
+        colormap: str = "plasma"
+    ) -> np.ndarray:
+        """
+        Overlay depth visualization on the original image.
+        
+        Args:
+            image: Original RGB image
+            depth_map: 2D depth array
+            alpha: Blend factor (0 = only image, 1 = only depth)
+            colormap: Matplotlib colormap name
+            
+        Returns:
+            Blended RGB image
+        """
+        depth_colored = DepthMapVisualizer.to_colormap(depth_map, colormap)
+        
+        # Resize if needed
+        if depth_colored.shape[:2] != image.shape[:2]:
+            depth_pil = Image.fromarray(depth_colored)
+            depth_pil = depth_pil.resize((image.shape[1], image.shape[0]), Image.BILINEAR)
+            depth_colored = np.array(depth_pil)
+        
+        blended = ((1 - alpha) * image + alpha * depth_colored).astype(np.uint8)
+        return blended
+
+src/detector.py
+
+"""
+Stage A: Open-Vocabulary 2D Object Detection
+Uses YOLO-World for zero-shot object detection with text prompts.
+"""
+
+import numpy as np
+from typing import List, Dict, Optional, Tuple
+from dataclasses import dataclass
+from ultralytics import YOLO
+import time
+
+
+@dataclass
+class Detection2D:
+    """Represents a single 2D detection."""
+    class_name: str
+    confidence: float
+    bbox_xyxy: Tuple[float, float, float, float]  # (x1, y1, x2, y2)
+    center: Tuple[float, float]  # (cx, cy)
+    area: float
+    
+    def to_dict(self) -> Dict:
+        return {
+            "class": self.class_name,
+            "confidence": self.confidence,
+            "bbox_xyxy": list(self.bbox_xyxy),
+            "center": list(self.center),
+            "area": self.area
+        }
+
+
+class OpenVocabDetector:
+    """
+    Stage A: Open-Vocabulary 2D Object Detection using YOLO-World.
+    
+    Supports dynamic class queries without retraining.
+    """
+    
+    SUPPORTED_MODELS = [
+        "yolov8n-world",  # Nano - fastest
+        "yolov8s-world",  # Small - balanced
+        "yolov8m-world",  # Medium - more accurate
+        "yolov8l-world",  # Large - highest accuracy
+    ]
+    
+    def __init__(
+        self,
+        model_name: str = "yolov8s-world",
+        confidence_threshold: float = 0.25,
+        iou_threshold: float = 0.45,
+        device: str = "cpu"
+    ):
+        """
+        Initialize the open-vocabulary detector.
+        
+        Args:
+            model_name: YOLO-World model variant
+            confidence_threshold: Minimum confidence for detections
+            iou_threshold: IoU threshold for NMS
+            device: Device to run inference on ('cpu', 'cuda:0', etc.)
+        """
+        self.model_name = model_name
+        self.confidence_threshold = confidence_threshold
+        self.iou_threshold = iou_threshold
+        self.device = device
+        self.current_classes: List[str] = []
+        
+        print(f"[Stage A] Loading {model_name}...")
+        self.model = YOLO(f"{model_name}.pt")
+        print(f"[Stage A] Model loaded successfully on {device}")
+        
+    def set_classes(self, classes: List[str]) -> None:
+        """
+        Set the target classes for open-vocabulary detection.
+        
+        Args:
+            classes: List of class names to detect (e.g., ["chair", "table", "cup"])
+        """
+        self.current_classes = classes
+        self.model.set_classes(classes)
+        print(f"[Stage A] Classes set: {classes}")
+        
+    def detect(
+        self,
+        image: np.ndarray,
+        classes: Optional[List[str]] = None,
+        return_raw: bool = False
+    ) -> Tuple[List[Detection2D], float]:
+        """
+        Run 2D object detection on an image.
+        
+        Args:
+            image: Input image (RGB, numpy array)
+            classes: Optional class list (overrides set_classes)
+            return_raw: If True, also return raw YOLO results
+            
+        Returns:
+            Tuple of (list of Detection2D objects, inference time in ms)
+        """
+        # Update classes if provided
+        if classes is not None and classes != self.current_classes:
+            self.set_classes(classes)
+        
+        if not self.current_classes:
+            raise ValueError("No classes set. Call set_classes() first or provide classes parameter.")
+        
+        # Run inference
+        start_time = time.perf_counter()
+        results = self.model.predict(
+            image,
+            conf=self.confidence_threshold,
+            iou=self.iou_threshold,
+            device=self.device,
+            verbose=False
+        )
+        inference_time = (time.perf_counter() - start_time) * 1000  # ms
+        
+        # Parse results
+        detections = []
+        for result in results:
+            for box in result.boxes:
+                cls_id = int(box.cls[0])
+                conf = float(box.conf[0])
+                xyxy = box.xyxy[0].cpu().numpy()
+                
+                x1, y1, x2, y2 = xyxy
+                center = ((x1 + x2) / 2, (y1 + y2) / 2)
+                area = (x2 - x1) * (y2 - y1)
+                
+                detection = Detection2D(
+                    class_name=result.names[cls_id],
+                    confidence=conf,
+                    bbox_xyxy=(x1, y1, x2, y2),
+                    center=center,
+                    area=area
+                )
+                detections.append(detection)
+        
+        if return_raw:
+            return detections, inference_time, results
+        return detections, inference_time
+    
+    def get_model_info(self) -> Dict:
+        """Get information about the loaded model."""
+        return {
+            "model_name": self.model_name,
+            "device": self.device,
+            "confidence_threshold": self.confidence_threshold,
+            "iou_threshold": self.iou_threshold,
+            "current_classes": self.current_classes
+        }
+
+
+# Utility functions
+def filter_detections_by_confidence(
+    detections: List[Detection2D],
+    min_confidence: float
+) -> List[Detection2D]:
+    """Filter detections by minimum confidence threshold."""
+    return [d for d in detections if d.confidence >= min_confidence]
+
+
+def filter_detections_by_class(
+    detections: List[Detection2D],
+    classes: List[str]
+) -> List[Detection2D]:
+    """Filter detections to include only specified classes."""
+    return [d for d in detections if d.class_name in classes]
+
+
+def get_largest_detection(
+    detections: List[Detection2D],
+    class_name: Optional[str] = None
+) -> Optional[Detection2D]:
+    """Get the detection with the largest bounding box area."""
+    if class_name:
+        detections = filter_detections_by_class(detections, [class_name])
+    if not detections:
+        return None
+    return max(detections, key=lambda d: d.area)
+
+src/evaluation.py
+
+"""
+Evaluation metrics for SP1 3D Detection Pipeline
+
+Provides quantitative assessment of:
+- 2D Detection accuracy
+- Depth estimation accuracy  
+- 3D localization accuracy
+- Runtime performance
+"""
+
+import numpy as np
+from typing import List, Dict, Optional, Tuple
+from dataclasses import dataclass
+import json
+from pathlib import Path
+
+from src.projector import BoundingBox3D, compute_3d_iou
+from src.detector import Detection2D
+
+
+@dataclass
+class EvaluationResult:
+    """Container for evaluation metrics."""
+    # Detection metrics
+    num_predictions: int
+    num_ground_truth: int
+    true_positives: int
+    false_positives: int
+    false_negatives: int
+    precision: float
+    recall: float
+    f1_score: float
+    
+    # Depth metrics
+    depth_mae: float  # Mean Absolute Error
+    depth_rmse: float  # Root Mean Square Error
+    depth_abs_rel: float  # Absolute Relative Error
+    
+    # 3D metrics
+    mean_3d_iou: float
+    localization_error_m: float  # Mean 3D distance error
+    
+    # Performance metrics
+    mean_inference_time_ms: float
+    fps: float
+    
+    def to_dict(self) -> Dict:
+        return {
+            "detection": {
+                "num_predictions": self.num_predictions,
+                "num_ground_truth": self.num_ground_truth,
+                "true_positives": self.true_positives,
+                "false_positives": self.false_positives,
+                "false_negatives": self.false_negatives,
+                "precision": self.precision,
+                "recall": self.recall,
+                "f1_score": self.f1_score
+            },
+            "depth": {
+                "mae": self.depth_mae,
+                "rmse": self.depth_rmse,
+                "abs_rel": self.depth_abs_rel
+            },
+            "3d_localization": {
+                "mean_iou": self.mean_3d_iou,
+                "mean_error_m": self.localization_error_m
+            },
+            "performance": {
+                "mean_inference_ms": self.mean_inference_time_ms,
+                "fps": self.fps
+            }
+        }
+    
+    def summary(self) -> str:
+        lines = [
+            "=" * 50,
+            "SP1 PIPELINE EVALUATION RESULTS",
+            "=" * 50,
+            "",
+            "DETECTION METRICS:",
+            f"  Predictions: {self.num_predictions}",
+            f"  Ground Truth: {self.num_ground_truth}",
+            f"  True Positives: {self.true_positives}",
+            f"  Precision: {self.precision:.3f}",
+            f"  Recall: {self.recall:.3f}",
+            f"  F1 Score: {self.f1_score:.3f}",
+            "",
+            "DEPTH METRICS:",
+            f"  MAE: {self.depth_mae:.3f} m",
+            f"  RMSE: {self.depth_rmse:.3f} m",
+            f"  Abs Relative: {self.depth_abs_rel:.3f}",
+            "",
+            "3D LOCALIZATION:",
+            f"  Mean 3D IoU: {self.mean_3d_iou:.3f}",
+            f"  Mean Error: {self.localization_error_m:.3f} m",
+            "",
+            "PERFORMANCE:",
+            f"  Inference Time: {self.mean_inference_time_ms:.1f} ms",
+            f"  FPS: {self.fps:.1f}",
+            "=" * 50
+        ]
+        return "\n".join(lines)
+
+
+class PipelineEvaluator:
+    """
+    Evaluator for the SP1 3D Detection Pipeline.
+    
+    Supports evaluation against ground truth data for:
+    - Standard benchmarks (ScanNet, SUN RGB-D)
+    - Custom annotated datasets
+    """
+    
+    def __init__(
+        self,
+        iou_threshold_2d: float = 0.5,
+        iou_threshold_3d: float = 0.25,
+        depth_threshold_m: float = 0.5
+    ):
+        """
+        Initialize evaluator.
+        
+        Args:
+            iou_threshold_2d: IoU threshold for 2D detection matching
+            iou_threshold_3d: IoU threshold for 3D detection matching
+            depth_threshold_m: Depth error threshold for correct match
+        """
+        self.iou_threshold_2d = iou_threshold_2d
+        self.iou_threshold_3d = iou_threshold_3d
+        self.depth_threshold_m = depth_threshold_m
+        
+        # Accumulated metrics
+        self.reset()
+    
+    def reset(self):
+        """Reset accumulated metrics."""
+        self.all_predictions = []
+        self.all_ground_truth = []
+        self.depth_errors = []
+        self.iou_scores = []
+        self.localization_errors = []
+        self.inference_times = []
+    
+    def add_sample(
+        self,
+        predictions: List[BoundingBox3D],
+        ground_truth: List[Dict],
+        depth_pred: np.ndarray,
+        depth_gt: Optional[np.ndarray] = None,
+        inference_time_ms: float = 0
+    ):
+        """
+        Add evaluation sample.
+        
+        Args:
+            predictions: Predicted 3D bounding boxes
+            ground_truth: Ground truth annotations (list of dicts with 'class', 'center_3d', 'dimensions')
+            depth_pred: Predicted depth map
+            depth_gt: Ground truth depth map (optional)
+            inference_time_ms: Inference time for this sample
+        """
+        self.all_predictions.append(predictions)
+        self.all_ground_truth.append(ground_truth)
+        self.inference_times.append(inference_time_ms)
+        
+        # Compute depth metrics if GT available
+        if depth_gt is not None:
+            valid_mask = depth_gt > 0
+            if valid_mask.sum() > 0:
+                pred_valid = depth_pred[valid_mask]
+                gt_valid = depth_gt[valid_mask]
+                
+                mae = np.mean(np.abs(pred_valid - gt_valid))
+                rmse = np.sqrt(np.mean((pred_valid - gt_valid) ** 2))
+                abs_rel = np.mean(np.abs(pred_valid - gt_valid) / gt_valid)
+                
+                self.depth_errors.append({
+                    'mae': mae,
+                    'rmse': rmse,
+                    'abs_rel': abs_rel
+                })
+        
+        # Match predictions to ground truth
+        matched_gt = set()
+        for pred in predictions:
+            best_iou = 0
+            best_gt_idx = -1
+            best_loc_error = float('inf')
+            
+            for gt_idx, gt in enumerate(ground_truth):
+                if gt_idx in matched_gt:
+                    continue
+                if gt.get('class', '').lower() != pred.class_name.lower():
+                    continue
+                
+                # Create GT bounding box
+                gt_box = BoundingBox3D(
+                    center=np.array(gt['center_3d']),
+                    dimensions=np.array(gt.get('dimensions', [0.5, 0.5, 0.5])),
+                    class_name=gt['class'],
+                    confidence=1.0
+                )
+                
+                iou = compute_3d_iou(pred, gt_box)
+                loc_error = np.linalg.norm(pred.center - gt_box.center)
+                
+                if iou > best_iou:
+                    best_iou = iou
+                    best_gt_idx = gt_idx
+                    best_loc_error = loc_error
+            
+            if best_iou > self.iou_threshold_3d:
+                matched_gt.add(best_gt_idx)
+                self.iou_scores.append(best_iou)
+                self.localization_errors.append(best_loc_error)
+    
+    def compute_metrics(self) -> EvaluationResult:
+        """Compute final evaluation metrics."""
+        total_pred = sum(len(p) for p in self.all_predictions)
+        total_gt = sum(len(g) for g in self.all_ground_truth)
+        tp = len(self.iou_scores)
+        fp = total_pred - tp
+        fn = total_gt - tp
+        
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+        
+        # Depth metrics
+        if self.depth_errors:
+            depth_mae = np.mean([e['mae'] for e in self.depth_errors])
+            depth_rmse = np.mean([e['rmse'] for e in self.depth_errors])
+            depth_abs_rel = np.mean([e['abs_rel'] for e in self.depth_errors])
+        else:
+            depth_mae = depth_rmse = depth_abs_rel = 0
+        
+        # 3D metrics
+        mean_iou = np.mean(self.iou_scores) if self.iou_scores else 0
+        mean_loc_error = np.mean(self.localization_errors) if self.localization_errors else 0
+        
+        # Performance
+        mean_time = np.mean(self.inference_times) if self.inference_times else 0
+        fps = 1000 / mean_time if mean_time > 0 else 0
+        
+        return EvaluationResult(
+            num_predictions=total_pred,
+            num_ground_truth=total_gt,
+            true_positives=tp,
+            false_positives=fp,
+            false_negatives=fn,
+            precision=precision,
+            recall=recall,
+            f1_score=f1,
+            depth_mae=depth_mae,
+            depth_rmse=depth_rmse,
+            depth_abs_rel=depth_abs_rel,
+            mean_3d_iou=mean_iou,
+            localization_error_m=mean_loc_error,
+            mean_inference_time_ms=mean_time,
+            fps=fps
+        )
+
+
+def compute_2d_iou(box1: Tuple[float, float, float, float], box2: Tuple[float, float, float, float]) -> float:
+    """Compute 2D IoU between two bounding boxes."""
+    x1 = max(box1[0], box2[0])
+    y1 = max(box1[1], box2[1])
+    x2 = min(box1[2], box2[2])
+    y2 = min(box1[3], box2[3])
+    
+    inter_area = max(0, x2 - x1) * max(0, y2 - y1)
+    
+    area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+    
+    union_area = area1 + area2 - inter_area
+    
+    return inter_area / union_area if union_area > 0 else 0
+
+
+def create_synthetic_ground_truth(detections: List[BoundingBox3D], noise_level: float = 0.1) -> List[Dict]:
+    """
+    Create synthetic ground truth from detections (for testing).
+    
+    Useful when you don't have real GT but want to test the evaluation pipeline.
+    """
+    gt = []
+    for det in detections:
+        noise = np.random.randn(3) * noise_level
+        gt.append({
+            'class': det.class_name,
+            'center_3d': (det.center + noise).tolist(),
+            'dimensions': det.dimensions.tolist()
+        })
+    return gt
+
+
+class DepthEvaluator:
+    """Standalone evaluator for depth estimation quality."""
+    
+    @staticmethod
+    def evaluate_depth_map(
+        pred: np.ndarray,
+        gt: np.ndarray,
+        min_depth: float = 0.5,
+        max_depth: float = 10.0
+    ) -> Dict:
+        """
+        Evaluate depth map against ground truth.
+        
+        Standard metrics from depth estimation literature.
+        """
+        valid_mask = (gt > min_depth) & (gt < max_depth)
+        
+        if valid_mask.sum() == 0:
+            return {'error': 'No valid pixels'}
+        
+        pred_valid = pred[valid_mask]
+        gt_valid = gt[valid_mask]
+        
+        # Compute metrics
+        thresh = np.maximum(gt_valid / pred_valid, pred_valid / gt_valid)
+        
+        metrics = {
+            'mae': float(np.mean(np.abs(pred_valid - gt_valid))),
+            'rmse': float(np.sqrt(np.mean((pred_valid - gt_valid) ** 2))),
+            'abs_rel': float(np.mean(np.abs(pred_valid - gt_valid) / gt_valid)),
+            'sq_rel': float(np.mean(((pred_valid - gt_valid) ** 2) / gt_valid)),
+            'log_rmse': float(np.sqrt(np.mean((np.log(pred_valid) - np.log(gt_valid)) ** 2))),
+            'delta_1': float(np.mean(thresh < 1.25)),
+            'delta_2': float(np.mean(thresh < 1.25 ** 2)),
+            'delta_3': float(np.mean(thresh < 1.25 ** 3)),
+        }
+        
+        return metrics
+
+src/pipeline.py
+"""
+SP1 3D Object Detection Pipeline
+Integrates all three stages: Detection → Depth → 3D Projection
+"""
+
+import numpy as np
+from typing import List, Dict, Optional, Tuple, Union
+from dataclasses import dataclass
+from pathlib import Path
+from PIL import Image
+import time
+import json
+import yaml
+
+from src.detector import OpenVocabDetector, Detection2D
+from src.depth_estimator import MonocularDepthEstimator, DepthResult
+from src.projector import Projector3D, BoundingBox3D, CameraIntrinsics
+
+
+@dataclass
+class PipelineResult:
+    """Complete result from the 3D detection pipeline."""
+    # Input info
+    image_path: Optional[str]
+    image_shape: Tuple[int, int, int]
+    query_classes: List[str]
+    
+    # Stage outputs
+    detections_2d: List[Detection2D]
+    depth_result: DepthResult
+    detections_3d: List[BoundingBox3D]
+    
+    # Timing
+    detection_time_ms: float
+    depth_time_ms: float
+    projection_time_ms: float
+    total_time_ms: float
+    
+    def to_dict(self) -> Dict:
+        """Convert result to dictionary for serialization."""
+        return {
+            "image_path": self.image_path,
+            "image_shape": list(self.image_shape),
+            "query_classes": self.query_classes,
+            "num_detections": len(self.detections_3d),
+            "detections_3d": [d.to_dict() for d in self.detections_3d],
+            "timing": {
+                "detection_ms": self.detection_time_ms,
+                "depth_ms": self.depth_time_ms,
+                "projection_ms": self.projection_time_ms,
+                "total_ms": self.total_time_ms
+            },
+            "depth_stats": {
+                "min_depth": self.depth_result.min_depth,
+                "max_depth": self.depth_result.max_depth,
+                "mean_depth": self.depth_result.mean_depth
+            }
+        }
+    
+    def save_json(self, path: str) -> None:
+        """Save result to JSON file."""
+        with open(path, 'w') as f:
+            json.dump(self.to_dict(), f, indent=2)
+    
+    def summary(self) -> str:
+        """Get a human-readable summary."""
+        lines = [
+            f"=== SP1 3D Detection Results ===",
+            f"Image: {self.image_path or 'N/A'}",
+            f"Shape: {self.image_shape}",
+            f"Query: {self.query_classes}",
+            f"",
+            f"Detections ({len(self.detections_3d)} objects):",
+        ]
+        
+        for i, det in enumerate(self.detections_3d):
+            lines.append(
+                f"  [{i+1}] {det.class_name}: "
+                f"depth={det.center[2]:.2f}m, "
+                f"conf={det.confidence:.2f}"
+            )
+        
+        lines.extend([
+            f"",
+            f"Timing:",
+            f"  Detection: {self.detection_time_ms:.1f}ms",
+            f"  Depth: {self.depth_time_ms:.1f}ms",
+            f"  Projection: {self.projection_time_ms:.1f}ms",
+            f"  Total: {self.total_time_ms:.1f}ms",
+            f"  FPS: {1000/self.total_time_ms:.1f}"
+        ])
+        
+        return "\n".join(lines)
+
+
+class SP1Pipeline:
+    """
+    Sub-Project 1: Complete 3D Object Detection Pipeline
+    
+    RGB-Only pipeline for open-vocabulary 3D object detection.
+    
+    Pipeline stages:
+        A. Open-Vocabulary 2D Detection (YOLO-World)
+        B. Monocular Depth Estimation (Depth Anything V2)
+        C. 3D Geometric Projection
+    """
+    
+    def __init__(
+        self,
+        config_path: Optional[str] = None,
+        detector_model: str = "yolov8s-world",
+        depth_model: str = "depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf",
+        camera: Optional[CameraIntrinsics] = None,
+        device: str = "cpu",
+        confidence_threshold: float = 0.25,
+        min_depth: float = 0.5,
+        max_depth: float = 10.0
+    ):
+        """
+        Initialize the SP1 pipeline.
+        
+        Args:
+            config_path: Path to YAML config file (overrides other args)
+            detector_model: YOLO-World model variant
+            depth_model: Depth estimation model
+            camera: Camera intrinsics (auto-detected if None)
+            device: Device for inference ('cpu', 'cuda:0')
+            confidence_threshold: Min confidence for detections
+            min_depth: Minimum depth in meters
+            max_depth: Maximum depth in meters
+        """
+        # Load config if provided
+        if config_path:
+            config = self._load_config(config_path)
+            detector_model = config.get('detector', {}).get('model_name', detector_model)
+            depth_model = config.get('depth_estimator', {}).get('model_name', depth_model)
+            device = config.get('detector', {}).get('device', device)
+            confidence_threshold = config.get('detector', {}).get('confidence_threshold', confidence_threshold)
+            depth_range = config.get('depth_estimator', {}).get('depth_range', {})
+            min_depth = depth_range.get('min_depth', min_depth)
+            max_depth = depth_range.get('max_depth', max_depth)
+        
+        self.device = device
+        self.camera = camera
+        
+        # Initialize stages
+        print("=" * 50)
+        print("Initializing SP1 3D Detection Pipeline")
+        print("=" * 50)
+        
+        # Stage A: Detector
+        self.detector = OpenVocabDetector(
+            model_name=detector_model,
+            confidence_threshold=confidence_threshold,
+            device=device
+        )
+        
+        # Stage B: Depth estimator
+        self.depth_estimator = MonocularDepthEstimator(
+            model_name=depth_model,
+            min_depth=min_depth,
+            max_depth=max_depth,
+            device=device
+        )
+        
+        # Stage C: Projector (initialized per-image based on resolution)
+        self.projector: Optional[Projector3D] = None
+        
+        print("=" * 50)
+        print("Pipeline initialized successfully!")
+        print("=" * 50)
+    
+    def _load_config(self, path: str) -> Dict:
+        """Load configuration from YAML file."""
+        with open(path, 'r') as f:
+            return yaml.safe_load(f)
+    
+    def _ensure_projector(self, image_shape: Tuple[int, ...]) -> None:
+        """Initialize or update projector for image dimensions."""
+        h, w = image_shape[:2]
+        
+        if self.camera is not None:
+            camera = self.camera.scale_to_image(w, h)
+        else:
+            # Auto-detect camera intrinsics
+            camera = CameraIntrinsics.from_fov(w, h, fov_horizontal_deg=60.0)
+        
+        self.projector = Projector3D(camera=camera)
+    
+    def detect(
+        self,
+        image: Union[str, np.ndarray, Image.Image],
+        classes: List[str],
+        return_visualization: bool = False
+    ) -> PipelineResult:
+        """
+        Run the complete 3D detection pipeline.
+        
+        Args:
+            image: Input image (path, numpy array, or PIL Image)
+            classes: List of object classes to detect
+            return_visualization: If True, include visualization data
+            
+        Returns:
+            PipelineResult with all detection information
+        """
+        # Load image
+        image_path = None
+        if isinstance(image, str):
+            image_path = image
+            image = np.array(Image.open(image).convert('RGB'))
+        elif isinstance(image, Image.Image):
+            image = np.array(image.convert('RGB'))
+        
+        # Ensure projector is initialized
+        self._ensure_projector(image.shape)
+        
+        # === Stage A: 2D Detection ===
+        detections_2d, detection_time = self.detector.detect(image, classes)
+        
+        # === Stage B: Depth Estimation ===
+        depth_result = self.depth_estimator.estimate_depth(image)
+        depth_time = depth_result.inference_time_ms
+        
+        # === Stage C: 3D Projection ===
+        proj_start = time.perf_counter()
+        detections_3d = self.projector.project_all_detections(
+            detections_2d, depth_result
+        )
+        projection_time = (time.perf_counter() - proj_start) * 1000
+        
+        total_time = detection_time + depth_time + projection_time
+        
+        return PipelineResult(
+            image_path=image_path,
+            image_shape=image.shape,
+            query_classes=classes,
+            detections_2d=detections_2d,
+            depth_result=depth_result,
+            detections_3d=detections_3d,
+            detection_time_ms=detection_time,
+            depth_time_ms=depth_time,
+            projection_time_ms=projection_time,
+            total_time_ms=total_time
+        )
+    
+    def detect_single_object(
+        self,
+        image: Union[str, np.ndarray, Image.Image],
+        object_query: str
+    ) -> Optional[BoundingBox3D]:
+        """
+        Detect a single object by name and return its 3D location.
+        
+        Args:
+            image: Input image
+            object_query: Object to find (e.g., "red chair", "laptop")
+            
+        Returns:
+            3D bounding box of the most confident detection, or None
+        """
+        result = self.detect(image, [object_query])
+        
+        if not result.detections_3d:
+            return None
+            
+        # Return highest confidence detection
+        return max(result.detections_3d, key=lambda d: d.confidence)
+
+
+    def get_waypoint(
+        self,
+        image: Union[str, np.ndarray, Image.Image],
+        target_object: str,
+        offset_distance: float = 0.5
+    ) -> Optional[Dict]:
+        """
+        Get a navigation waypoint to approach a target object.
+        """
+        # Run full detection with the target as a list
+        result = self.detect(image, [target_object])
+        
+        if not result.detections_3d:
+            return None
+        
+        # Get highest confidence detection
+        detection = max(result.detections_3d, key=lambda d: d.confidence)
+        
+        # Calculate waypoint in front of object
+        obj_pos = detection.center
+        
+        # Handle zero position case
+        if np.linalg.norm(obj_pos) < 0.001:
+            return None
+            
+        direction = obj_pos / np.linalg.norm(obj_pos)
+        waypoint = obj_pos - direction * offset_distance
+        
+        return {
+            "target_object": target_object,
+            "object_position": obj_pos.tolist(),
+            "waypoint_position": waypoint.tolist(),
+            "distance_to_object": float(np.linalg.norm(obj_pos)),
+            "confidence": detection.confidence
+        } 
+    
+
+    def warmup(self, image_size: Tuple[int, int] = (640, 480), iterations: int = 3) -> None:
+        """
+        Warm up the pipeline with dummy inference.
+        
+        Useful for getting accurate timing measurements.
+        """
+        print(f"Warming up pipeline ({iterations} iterations)...")
+        dummy_image = np.random.randint(0, 255, (*image_size, 3), dtype=np.uint8)
+        
+        for i in range(iterations):
+            _ = self.detect(dummy_image, ["object"])
+            print(f"  Warmup {i+1}/{iterations} complete")
+        
+        print("Warmup complete!")
+    
+    def benchmark(
+        self,
+        image: Union[str, np.ndarray],
+        classes: List[str],
+        num_runs: int = 10
+    ) -> Dict:
+        """
+        Run timing benchmark on the pipeline.
+        
+        Args:
+            image: Test image
+            classes: Classes to detect
+            num_runs: Number of inference runs
+            
+        Returns:
+            Dict with timing statistics
+        """
+        times = {
+            'detection': [],
+            'depth': [],
+            'projection': [],
+            'total': []
+        }
+        
+        # Warmup
+        self.warmup()
+        
+        # Benchmark runs
+        print(f"Running {num_runs} benchmark iterations...")
+        for i in range(num_runs):
+            result = self.detect(image, classes)
+            times['detection'].append(result.detection_time_ms)
+            times['depth'].append(result.depth_time_ms)
+            times['projection'].append(result.projection_time_ms)
+            times['total'].append(result.total_time_ms)
+        
+        # Compute statistics
+        stats = {}
+        for key, values in times.items():
+            stats[key] = {
+                'mean_ms': np.mean(values),
+                'std_ms': np.std(values),
+                'min_ms': np.min(values),
+                'max_ms': np.max(values)
+            }
+        
+        stats['fps'] = 1000 / stats['total']['mean_ms']
+        
+        return stats
+    
+    def get_pipeline_info(self) -> Dict:
+        """Get information about the pipeline configuration."""
+        return {
+            "detector": self.detector.get_model_info(),
+            "depth_estimator": self.depth_estimator.get_model_info(),
+            "device": self.device
+        }
+
+ src/projector.py   
+
+
+"""
+Stage C: 3D Geometric Projection
+Converts 2D detections + depth estimates into 3D bounding boxes.
+"""
+
+import numpy as np
+from typing import List, Dict, Tuple, Optional
+from dataclasses import dataclass, field
+from src.detector import Detection2D
+from src.depth_estimator import DepthResult
+
+
+@dataclass
+class CameraIntrinsics:
+    """Camera intrinsic parameters."""
+    fx: float  # Focal length x (pixels)
+    fy: float  # Focal length y (pixels)
+    cx: float  # Principal point x (pixels)
+    cy: float  # Principal point y (pixels)
+    width: int  # Image width
+    height: int  # Image height
+    
+    @classmethod
+    def from_fov(
+        cls,
+        width: int,
+        height: int,
+        fov_horizontal_deg: float = 60.0
+    ) -> "CameraIntrinsics":
+        """
+        Create intrinsics from field of view.
+        
+        Args:
+            width: Image width in pixels
+            height: Image height in pixels
+            fov_horizontal_deg: Horizontal field of view in degrees
+        """
+        fov_rad = np.radians(fov_horizontal_deg)
+        fx = width / (2 * np.tan(fov_rad / 2))
+        fy = fx  # Assume square pixels
+        cx = width / 2
+        cy = height / 2
+        return cls(fx=fx, fy=fy, cx=cx, cy=cy, width=width, height=height)
+    
+    @classmethod
+    def default_640x480(cls) -> "CameraIntrinsics":
+        """Default intrinsics for 640x480 images."""
+        return cls(fx=525.0, fy=525.0, cx=320.0, cy=240.0, width=640, height=480)
+    
+    def scale_to_image(self, new_width: int, new_height: int) -> "CameraIntrinsics":
+        """Scale intrinsics to a different image size."""
+        scale_x = new_width / self.width
+        scale_y = new_height / self.height
+        return CameraIntrinsics(
+            fx=self.fx * scale_x,
+            fy=self.fy * scale_y,
+            cx=self.cx * scale_x,
+            cy=self.cy * scale_y,
+            width=new_width,
+            height=new_height
+        )
+    
+    def pixel_to_ray(self, x: float, y: float) -> np.ndarray:
+        """
+        Convert pixel coordinates to a unit ray direction.
+        
+        Args:
+            x, y: Pixel coordinates
+            
+        Returns:
+            Unit vector [x, y, z] in camera frame
+        """
+        ray = np.array([
+            (x - self.cx) / self.fx,
+            (y - self.cy) / self.fy,
+            1.0
+        ])
+        return ray / np.linalg.norm(ray)
+    
+    def pixel_to_3d(self, x: float, y: float, depth: float) -> np.ndarray:
+        """
+        Back-project a pixel to 3D coordinates.
+        
+        Args:
+            x, y: Pixel coordinates
+            depth: Depth value in meters
+            
+        Returns:
+            3D point [X, Y, Z] in camera frame (meters)
+        """
+        X = (x - self.cx) * depth / self.fx
+        Y = (y - self.cy) * depth / self.fy
+        Z = depth
+        return np.array([X, Y, Z])
+
+
+@dataclass
+class BoundingBox3D:
+    """Represents a 3D bounding box in camera coordinates."""
+    center: np.ndarray  # [X, Y, Z] in meters
+    dimensions: np.ndarray  # [width, height, depth] in meters
+    class_name: str
+    confidence: float
+    corners_3d: Optional[np.ndarray] = None  # 8x3 array of corner points
+    
+    # Original 2D detection info
+    bbox_2d: Optional[Tuple[float, float, float, float]] = None
+    depth_estimate: Optional[float] = None
+    
+    def to_dict(self) -> Dict:
+        return {
+            "class": self.class_name,
+            "confidence": self.confidence,
+            "center_3d": self.center.tolist(),
+            "dimensions": self.dimensions.tolist(),
+            "depth_meters": float(self.center[2]),
+            "bbox_2d": list(self.bbox_2d) if self.bbox_2d else None,
+            "corners_3d": self.corners_3d.tolist() if self.corners_3d is not None else None
+        }
+    
+    def get_corners(self) -> np.ndarray:
+        """
+        Get the 8 corners of the 3D bounding box.
+        
+        Returns:
+            8x3 array of corner coordinates
+        """
+        if self.corners_3d is not None:
+            return self.corners_3d
+            
+        w, h, d = self.dimensions / 2
+        cx, cy, cz = self.center
+        
+        corners = np.array([
+            [cx - w, cy - h, cz - d],
+            [cx + w, cy - h, cz - d],
+            [cx + w, cy + h, cz - d],
+            [cx - w, cy + h, cz - d],
+            [cx - w, cy - h, cz + d],
+            [cx + w, cy - h, cz + d],
+            [cx + w, cy + h, cz + d],
+            [cx - w, cy + h, cz + d],
+        ])
+        return corners
+
+
+class Projector3D:
+    """
+    Stage C: Projects 2D detections to 3D space using depth information.
+    """
+    
+    # Approximate real-world sizes for common objects (meters)
+    OBJECT_SIZE_PRIORS = {
+        "chair": (0.5, 0.9, 0.5),
+        "sofa": (2.0, 0.9, 0.9),
+        "table": (1.2, 0.75, 0.8),
+        "desk": (1.2, 0.75, 0.6),
+        "bed": (2.0, 0.6, 1.5),
+        "tv": (1.0, 0.6, 0.1),
+        "monitor": (0.5, 0.4, 0.1),
+        "lamp": (0.3, 0.5, 0.3),
+        "door": (0.9, 2.1, 0.1),
+        "window": (1.0, 1.2, 0.1),
+        "plant": (0.4, 0.6, 0.4),
+        "pillow": (0.5, 0.1, 0.5),
+        "cup": (0.08, 0.12, 0.08),
+        "bottle": (0.08, 0.25, 0.08),
+        "book": (0.15, 0.02, 0.22),
+        "laptop": (0.35, 0.02, 0.25),
+        "phone": (0.07, 0.15, 0.01),
+        "remote": (0.05, 0.18, 0.02),
+        "person": (0.5, 1.7, 0.3),
+        "default": (0.5, 0.5, 0.5)
+    }
+    
+    def __init__(
+        self,
+        camera: CameraIntrinsics,
+        depth_sampling_method: str = "median",
+        use_size_priors: bool = True
+    ):
+        """
+        Initialize the 3D projector.
+        
+        Args:
+            camera: Camera intrinsic parameters
+            depth_sampling_method: How to sample depth in bbox region
+            use_size_priors: Use prior knowledge of object sizes
+        """
+        self.camera = camera
+        self.depth_sampling_method = depth_sampling_method
+        self.use_size_priors = use_size_priors
+        
+    def project_detection(
+        self,
+        detection: Detection2D,
+        depth_result: DepthResult
+    ) -> BoundingBox3D:
+        """
+        Project a single 2D detection to 3D.
+        
+        Args:
+            detection: 2D detection from Stage A
+            depth_result: Depth estimation from Stage B
+            
+        Returns:
+            3D bounding box
+        """
+        x1, y1, x2, y2 = detection.bbox_xyxy
+        cx, cy = detection.center
+        
+        # Get depth for this detection
+        depth = depth_result.get_depth_in_region(
+            int(x1), int(y1), int(x2), int(y2),
+            method=self.depth_sampling_method
+        )
+        
+        # Project center to 3D
+        center_3d = self.camera.pixel_to_3d(cx, cy, depth)
+        
+        # Estimate 3D dimensions
+        dimensions = self._estimate_dimensions(detection, depth)
+        
+        return BoundingBox3D(
+            center=center_3d,
+            dimensions=dimensions,
+            class_name=detection.class_name,
+            confidence=detection.confidence,
+            bbox_2d=detection.bbox_xyxy,
+            depth_estimate=depth
+        )
+    
+    def project_all_detections(
+        self,
+        detections: List[Detection2D],
+        depth_result: DepthResult
+    ) -> List[BoundingBox3D]:
+        """
+        Project all 2D detections to 3D.
+        
+        Args:
+            detections: List of 2D detections
+            depth_result: Depth estimation result
+            
+        Returns:
+            List of 3D bounding boxes
+        """
+        boxes_3d = []
+        for det in detections:
+            box_3d = self.project_detection(det, depth_result)
+            boxes_3d.append(box_3d)
+        return boxes_3d
+    
+    def _estimate_dimensions(
+        self,
+        detection: Detection2D,
+        depth: float
+    ) -> np.ndarray:
+        """
+        Estimate 3D dimensions of an object.
+        
+        Uses a combination of:
+        1. Prior knowledge of typical object sizes
+        2. 2D bbox dimensions projected to 3D
+        """
+        x1, y1, x2, y2 = detection.bbox_xyxy
+        bbox_width_px = x2 - x1
+        bbox_height_px = y2 - y1
+        
+        # Project 2D dimensions to 3D at the estimated depth
+        width_3d = bbox_width_px * depth / self.camera.fx
+        height_3d = bbox_height_px * depth / self.camera.fy
+        
+        # Get size prior if available
+        class_lower = detection.class_name.lower()
+        if self.use_size_priors and class_lower in self.OBJECT_SIZE_PRIORS:
+            prior = self.OBJECT_SIZE_PRIORS[class_lower]
+            # Blend projected size with prior (favor prior for depth dimension)
+            width_3d = 0.7 * width_3d + 0.3 * prior[0]
+            height_3d = 0.7 * height_3d + 0.3 * prior[1]
+            depth_3d = prior[2]  # Use prior for depth (can't estimate from single view)
+        else:
+            # Estimate depth as average of width and height
+            depth_3d = (width_3d + height_3d) / 2
+            
+        return np.array([width_3d, height_3d, depth_3d])
+    
+    def generate_point_cloud_from_depth(
+        self,
+        depth_result: DepthResult,
+        image: Optional[np.ndarray] = None,
+        downsample: int = 4
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        """
+        Generate a 3D point cloud from the depth map.
+        
+        Args:
+            depth_result: Depth estimation result
+            image: Optional RGB image for coloring points
+            downsample: Downsample factor to reduce point count
+            
+        Returns:
+            Tuple of (points Nx3, colors Nx3 or None)
+        """
+        h, w = depth_result.depth_map.shape
+        
+        # Create pixel grid
+        u = np.arange(0, w, downsample)
+        v = np.arange(0, h, downsample)
+        u, v = np.meshgrid(u, v)
+        u = u.flatten()
+        v = v.flatten()
+        
+        # Get depths
+        depths = depth_result.depth_map[v, u]
+        
+        # Filter invalid depths
+        valid = depths > 0
+        u, v, depths = u[valid], v[valid], depths[valid]
+        
+        # Back-project to 3D
+        X = (u - self.camera.cx) * depths / self.camera.fx
+        Y = (v - self.camera.cy) * depths / self.camera.fy
+        Z = depths
+        
+        points = np.stack([X, Y, Z], axis=1)
+        
+        # Get colors if image provided
+        colors = None
+        if image is not None:
+            colors = image[v, u] / 255.0
+            
+        return points, colors
+
+
+def compute_3d_iou(box1: BoundingBox3D, box2: BoundingBox3D) -> float:
+    """
+    Compute 3D Intersection over Union between two boxes.
+    
+    Assumes axis-aligned boxes (no rotation).
+    """
+    # Get min/max corners
+    c1, d1 = box1.center, box1.dimensions / 2
+    c2, d2 = box2.center, box2.dimensions / 2
+    
+    min1, max1 = c1 - d1, c1 + d1
+    min2, max2 = c2 - d2, c2 + d2
+    
+    # Compute intersection
+    inter_min = np.maximum(min1, min2)
+    inter_max = np.minimum(max1, max2)
+    inter_dims = np.maximum(0, inter_max - inter_min)
+    inter_vol = np.prod(inter_dims)
+    
+    # Compute union
+    vol1 = np.prod(box1.dimensions)
+    vol2 = np.prod(box2.dimensions)
+    union_vol = vol1 + vol2 - inter_vol
+    
+    if union_vol <= 0:
+        return 0.0
+    return inter_vol / union_vol
+
+src/visualizer.py
+
+"""
+Visualization utilities for SP1 3D Detection Pipeline
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle, FancyBboxPatch
+from typing import List, Optional, Tuple, Dict
+from PIL import Image
+
+from src.detector import Detection2D
+from src.depth_estimator import DepthResult, DepthMapVisualizer
+from src.projector import BoundingBox3D
+
+
+class PipelineVisualizer:
+    """Visualization tools for the SP1 pipeline."""
+    
+    COLORS = [
+        '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+        '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
+    ]
+    
+    def __init__(self, figsize: Tuple[int, int] = (16, 10)):
+        self.figsize = figsize
+        self.class_colors: Dict[str, str] = {}
+        
+    def _get_color(self, class_name: str) -> str:
+        if class_name not in self.class_colors:
+            idx = len(self.class_colors) % len(self.COLORS)
+            self.class_colors[class_name] = self.COLORS[idx]
+        return self.class_colors[class_name]
+    
+    def visualize_pipeline_result(
+        self,
+        image: np.ndarray,
+        detections_2d: List[Detection2D],
+        depth_result: DepthResult,
+        detections_3d: List[BoundingBox3D],
+        title: str = "SP1 3D Detection Pipeline Results",
+        save_path: Optional[str] = None
+    ) -> plt.Figure:
+        """Create comprehensive visualization of pipeline results."""
+        fig = plt.figure(figsize=(18, 12))
+        
+        # 1. Original Image
+        ax1 = fig.add_subplot(2, 3, 1)
+        ax1.imshow(image)
+        ax1.set_title("Input RGB Image", fontsize=12, fontweight='bold')
+        ax1.axis('off')
+        
+        # 2. 2D Detections
+        ax2 = fig.add_subplot(2, 3, 2)
+        self._draw_2d_detections(ax2, image, detections_2d)
+        ax2.set_title("Stage A: Open-Vocab 2D Detection", fontsize=12, fontweight='bold')
+        ax2.axis('off')
+        
+        # 3. Depth Map
+        ax3 = fig.add_subplot(2, 3, 3)
+        depth_vis = DepthMapVisualizer.to_colormap(depth_result.depth_map, 'plasma')
+        ax3.imshow(depth_vis)
+        ax3.set_title("Stage B: Monocular Depth Estimation", fontsize=12, fontweight='bold')
+        ax3.axis('off')
+        
+        sm = plt.cm.ScalarMappable(
+            cmap='plasma',
+            norm=plt.Normalize(depth_result.min_depth, depth_result.max_depth)
+        )
+        cbar = fig.colorbar(sm, ax=ax3, fraction=0.046, pad=0.04)
+        cbar.set_label('Depth (m)', fontsize=10)
+        
+        # 4. Bird's Eye View
+        ax4 = fig.add_subplot(2, 3, 4)
+        self._draw_birds_eye_view(ax4, detections_3d)
+        ax4.set_title("Stage C: 3D Projection (Bird's Eye)", fontsize=12, fontweight='bold')
+        
+        # 5. Side View
+        ax5 = fig.add_subplot(2, 3, 5)
+        self._draw_side_view(ax5, detections_3d)
+        ax5.set_title("Stage C: 3D Projection (Side View)", fontsize=12, fontweight='bold')
+        
+        # 6. Detection Summary
+        ax6 = fig.add_subplot(2, 3, 6)
+        self._draw_summary_table(ax6, detections_3d, depth_result)
+        ax6.set_title("Detection Summary", fontsize=12, fontweight='bold')
+        ax6.axis('off')
+        
+        plt.suptitle(title, fontsize=14, fontweight='bold', y=0.98)
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        
+        if save_path:
+            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+            print(f"Visualization saved to: {save_path}")
+        
+        return fig
+    
+    def _draw_2d_detections(self, ax: plt.Axes, image: np.ndarray, detections: List[Detection2D]) -> None:
+        ax.imshow(image)
+        for det in detections:
+            x1, y1, x2, y2 = det.bbox_xyxy
+            color = self._get_color(det.class_name)
+            rect = Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor=color, facecolor='none')
+            ax.add_patch(rect)
+            label = f"{det.class_name}: {det.confidence:.2f}"
+            ax.text(x1, y1 - 5, label, fontsize=9, color='white', fontweight='bold',
+                    bbox=dict(boxstyle='round,pad=0.2', facecolor=color, alpha=0.8))
+    
+    def _draw_birds_eye_view(self, ax: plt.Axes, detections: List[BoundingBox3D]) -> None:
+        ax.set_xlabel('X (m)', fontsize=10)
+        ax.set_ylabel('Z (m) - Depth', fontsize=10)
+        ax.grid(True, alpha=0.3)
+        ax.plot(0, 0, 'k^', markersize=12, label='Camera')
+        ax.annotate('Camera', (0, 0), textcoords="offset points", xytext=(10, 10), fontsize=9)
+        
+        if detections:
+            max_depth = max([d.center[2] for d in detections])
+            fov_rad = np.radians(30)
+            ax.plot([0, -max_depth * np.tan(fov_rad)], [0, max_depth], 'k--', alpha=0.3, linewidth=1)
+            ax.plot([0, max_depth * np.tan(fov_rad)], [0, max_depth], 'k--', alpha=0.3, linewidth=1)
+        
+        for det in detections:
+            x, _, z = det.center
+            w, _, d = det.dimensions
+            color = self._get_color(det.class_name)
+            rect = Rectangle((x - w/2, z - d/2), w, d, linewidth=2, edgecolor=color, facecolor=color, alpha=0.3)
+            ax.add_patch(rect)
+            ax.plot(x, z, 'o', color=color, markersize=8)
+            ax.annotate(det.class_name, (x, z), textcoords="offset points", xytext=(5, 5), fontsize=8, color=color)
+        
+        ax.set_xlim(-5, 5)
+        ax.set_ylim(0, 12)
+    
+    def _draw_side_view(self, ax: plt.Axes, detections: List[BoundingBox3D]) -> None:
+        ax.set_xlabel('Z (m) - Depth', fontsize=10)
+        ax.set_ylabel('Y (m) - Height', fontsize=10)
+        ax.grid(True, alpha=0.3)
+        ax.axhline(y=0, color='brown', linewidth=2, label='Ground')
+        ax.plot(0, 0, 'k^', markersize=12)
+        ax.annotate('Camera', (0, 0), textcoords="offset points", xytext=(10, 10), fontsize=9)
+        
+        for det in detections:
+            _, y, z = det.center
+            _, h, d = det.dimensions
+            color = self._get_color(det.class_name)
+            rect = Rectangle((z - d/2, -y - h/2), d, h, linewidth=2, edgecolor=color, facecolor=color, alpha=0.3)
+            ax.add_patch(rect)
+            ax.plot(z, -y, 'o', color=color, markersize=8)
+            ax.annotate(det.class_name, (z, -y), textcoords="offset points", xytext=(5, 5), fontsize=8, color=color)
+        
+        ax.set_xlim(0, 12)
+        ax.set_ylim(-3, 3)
+    
+    def _draw_summary_table(self, ax: plt.Axes, detections: List[BoundingBox3D], depth_result: DepthResult) -> None:
+        ax.set_xlim(0, 10)
+        ax.set_ylim(0, 10)
+        
+        y_pos = 9.5
+        ax.text(0.5, y_pos, "Object", fontsize=10, fontweight='bold')
+        ax.text(3.5, y_pos, "Confidence", fontsize=10, fontweight='bold')
+        ax.text(6.0, y_pos, "Depth (m)", fontsize=10, fontweight='bold')
+        ax.text(8.0, y_pos, "Position", fontsize=10, fontweight='bold')
+        
+        y_pos -= 0.8
+        ax.axhline(y=y_pos + 0.3, xmin=0.05, xmax=0.95, color='black', linewidth=1)
+        
+        for det in detections[:8]:
+            color = self._get_color(det.class_name)
+            ax.text(0.5, y_pos, det.class_name, fontsize=9, color=color)
+            ax.text(3.5, y_pos, f"{det.confidence:.2f}", fontsize=9)
+            ax.text(6.0, y_pos, f"{det.center[2]:.2f}", fontsize=9)
+            ax.text(8.0, y_pos, f"({det.center[0]:.1f}, {det.center[1]:.1f})", fontsize=8)
+            y_pos -= 0.7
+        
+        y_pos -= 0.5
+        ax.axhline(y=y_pos + 0.3, xmin=0.05, xmax=0.95, color='gray', linewidth=0.5)
+        ax.text(0.5, y_pos, f"Total Objects: {len(detections)}", fontsize=9, style='italic')
+        ax.text(0.5, y_pos - 0.6, f"Depth Range: {depth_result.min_depth:.1f}m - {depth_result.max_depth:.1f}m", fontsize=9, style='italic')
+    
+    def create_3d_scene_plot(
+        self,
+        detections: List[BoundingBox3D],
+        point_cloud: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+        save_path: Optional[str] = None
+    ) -> plt.Figure:
+        """Create interactive 3D visualization."""
+        from mpl_toolkits.mplot3d import Axes3D
+        from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+        
+        fig = plt.figure(figsize=(12, 10))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        ax.scatter([0], [0], [0], c='black', marker='^', s=200, label='Camera')
+        
+        if point_cloud is not None:
+            points, colors = point_cloud
+            if colors is not None:
+                ax.scatter(points[:, 0], points[:, 2], -points[:, 1], c=colors, s=1, alpha=0.3)
+            else:
+                ax.scatter(points[:, 0], points[:, 2], -points[:, 1], c='gray', s=1, alpha=0.3)
+        
+        for det in detections:
+            corners = det.get_corners()
+            corners_plot = corners.copy()
+            corners_plot[:, [1, 2]] = corners_plot[:, [2, 1]]
+            corners_plot[:, 2] = -corners_plot[:, 2]
+            color = self._get_color(det.class_name)
+            
+            faces = [
+                [corners_plot[0], corners_plot[1], corners_plot[2], corners_plot[3]],
+                [corners_plot[4], corners_plot[5], corners_plot[6], corners_plot[7]],
+                [corners_plot[0], corners_plot[1], corners_plot[5], corners_plot[4]],
+                [corners_plot[2], corners_plot[3], corners_plot[7], corners_plot[6]],
+                [corners_plot[0], corners_plot[3], corners_plot[7], corners_plot[4]],
+                [corners_plot[1], corners_plot[2], corners_plot[6], corners_plot[5]]
+            ]
+            
+            ax.add_collection3d(Poly3DCollection(faces, alpha=0.3, facecolor=color, edgecolor=color, linewidth=1))
+            center_plot = det.center.copy()
+            center_plot[[1, 2]] = center_plot[[2, 1]]
+            center_plot[2] = -center_plot[2]
+            ax.text(center_plot[0], center_plot[1], center_plot[2], det.class_name, fontsize=9, color=color)
+        
+        ax.set_xlabel('X (m)')
+        ax.set_ylabel('Z (m) - Depth')
+        ax.set_zlabel('Y (m) - Height')
+        ax.set_title('3D Scene Reconstruction', fontsize=14, fontweight='bold')
+        
+        if save_path:
+            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        
+        return fig
+
+
+def quick_visualize(result, image: np.ndarray, save_path: Optional[str] = None) -> plt.Figure:
+    """Quick visualization helper function."""
+    viz = PipelineVisualizer()
+    return viz.visualize_pipeline_result(
+        image=image,
+        detections_2d=result.detections_2d,
+        depth_result=result.depth_result,
+        detections_3d=result.detections_3d,
+        save_path=save_path
+    )
+
