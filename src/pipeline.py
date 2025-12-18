@@ -158,8 +158,6 @@ class SP1Pipeline:
         # Stage B: Depth estimator
         self.depth_estimator = MonocularDepthEstimator(
             model_name=depth_model,
-            min_depth=min_depth,
-            max_depth=max_depth,
             device=device
         )
         

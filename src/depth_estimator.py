@@ -86,7 +86,7 @@ class MonocularDepthEstimator:
         model_name: str = "indoor_small",
         device: str = "cpu",
         depth_scale: float = 1.0,
-        max_depth_clip: float = 20.0
+        max_depth_clip: float = 40.0
     ):
         """
         Initialize the depth estimator.
