@@ -8,7 +8,6 @@ import time
 @dataclass
 class DepthResult:
     depth_map: np.ndarray  # 2D array of depth values in meters
-    min_depth: float       # Minimum depth in the scene (meters)
     max_depth: float       # Maximum depth in the scene (meters)
     mean_depth: float      # Mean depth (meters)
     inference_time_ms: float
@@ -164,7 +163,6 @@ class MonocularDepthEstimator:
         
         return DepthResult(
             depth_map=depth_map,
-            min_depth=float(depth_map.min()),
             max_depth=float(depth_map.max()),
             mean_depth=float(depth_map.mean()),
             inference_time_ms=inference_time
