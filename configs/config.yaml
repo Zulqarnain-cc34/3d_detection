@@ -1,0 +1,70 @@
+# Sub-Project 1: 3D Open-Vocabulary Object Detection Configuration
+# Target: Jetson Orin 8GB (RGB-Only Pipeline)
+
+pipeline:
+  name: "SP1_3D_Object_Detection"
+  version: "1.0.0"
+  description: "RGB-Only 3D Open-Vocabulary Object Detection Pipeline"
+
+# Stage A: Open-Vocabulary 2D Detection
+detector:
+  model_name: "yolov8s-world"  # Options: yolov8n-world, yolov8s-world, yolov8m-world
+  confidence_threshold: 0.25
+  iou_threshold: 0.45
+  device: "cpu"  # Change to "cuda:0" for GPU, "cpu" for CPU-only
+  
+# Stage B: Monocular Depth Estimation  
+depth_estimator:
+  model_name: "depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf"
+  # Alternative indoor model: "depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf"
+  depth_range:
+    min_depth: 0.5   # meters
+    max_depth: 10.0  # meters
+  use_metric_depth: true
+
+# Stage C: 3D Projection
+projection:
+  # Default camera intrinsics (override with calibration)
+  camera:
+    fx: 525.0  # focal length x (pixels)
+    fy: 525.0  # focal length y (pixels)
+    cx: 320.0  # principal point x (pixels)
+    cy: 240.0  # principal point y (pixels)
+    width: 640
+    height: 480
+  
+  # 3D bounding box estimation method
+  bbox_estimation:
+    method: "depth_sampling"  # Options: center_point, depth_sampling, point_cloud
+    sampling_points: 100
+    use_median: true
+
+# Evaluation settings
+evaluation:
+  metrics:
+    - "detection_accuracy"
+    - "depth_mae"
+    - "depth_rmse"
+    - "3d_iou"
+    - "inference_time"
+  
+  # Benchmark datasets
+  benchmarks:
+    - name: "custom_indoor"
+      path: "./data/test_images/"
+    
+# Output settings
+output:
+  save_visualizations: true
+  save_detections_json: true
+  visualization_dpi: 150
+  output_dir: "./outputs/"
+
+# Performance optimization (for Jetson deployment)
+optimization:
+  tensorrt:
+    enabled: false  # Enable for Jetson deployment
+    precision: "fp16"  # Options: fp32, fp16, int8
+  
+  batch_size: 1
+  warmup_iterations: 3

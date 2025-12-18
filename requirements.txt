@@ -1,0 +1,41 @@
+# SP1 3D Object Detection Pipeline - Requirements
+# Target: Jetson Orin 8GB / Desktop with GPU
+
+# Core ML frameworks
+torch>=2.0.0
+torchvision>=0.15.0
+
+# YOLO-World for open-vocabulary detection
+ultralytics>=8.0.0
+
+# Depth Anything V2 via Hugging Face
+transformers>=4.30.0
+huggingface-hub>=0.20.0
+
+# Image processing
+pillow>=9.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# Visualization
+matplotlib>=3.7.0
+supervision>=0.16.0
+
+# Configuration
+pyyaml>=6.0
+
+# HTTP requests for downloading test images
+requests>=2.28.0
+
+# Optional: For Jupyter notebook support
+# jupyter>=1.0.0
+# ipywidgets>=8.0.0
+
+# Optional: For TensorRT optimization (Jetson deployment)
+# tensorrt>=8.6.0
+# onnx>=1.14.0
+# onnxruntime-gpu>=1.15.0
+
+# Optional: For advanced 3D visualization
+# open3d>=0.17.0
+# plotly>=5.15.0
