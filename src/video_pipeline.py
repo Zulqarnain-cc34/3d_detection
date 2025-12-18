@@ -10,6 +10,18 @@ Extends the SP1 image pipeline to support:
 
 Author: SP1 Team
 Target: Jetson Orin 8GB / Desktop GPU
+
+Usage:
+    from src.pipeline import SP1Pipeline
+    from src.video_pipeline import SP1VideoPipeline, VideoConfig
+    
+    # IMPORTANT: Create an INSTANCE of SP1Pipeline, not import the module
+    pipeline = SP1Pipeline(device='cuda:0')  # This creates an instance
+    
+    config = VideoConfig(detection_classes=['person', 'chair', 'table'])
+    video_pipeline = SP1VideoPipeline(pipeline, config)
+    
+    video_pipeline.process_video('input.mp4', 'output.mp4')
 """
 
 import cv2
@@ -235,22 +247,18 @@ class SP1VideoPipeline:
     """
     Video processing extension for SP1 3D Object Detection Pipeline.
     
-    Usage:
-        from src import SP1Pipeline
+    IMPORTANT: You must pass an INSTANCE of SP1Pipeline, not the module!
+    
+    Correct usage:
+        from src.pipeline import SP1Pipeline
         from src.video_pipeline import SP1VideoPipeline, VideoConfig
         
-        # Initialize base pipeline
-        pipeline = SP1Pipeline(device='cuda:0')
-        
-        # Create video pipeline
-        config = VideoConfig(detection_classes=['chair', 'table', 'person'])
+        pipeline = SP1Pipeline(device='cuda:0')  # Create instance!
         video_pipeline = SP1VideoPipeline(pipeline, config)
-        
-        # Process video file
-        video_pipeline.process_video('input.mp4', 'output.mp4')
-        
-        # Or run on webcam
-        video_pipeline.run_webcam()
+    
+    Wrong usage:
+        from src import pipeline  # This imports the MODULE
+        video_pipeline = SP1VideoPipeline(pipeline, config)  # ERROR!
     """
     
     def __init__(self, pipeline, config: Optional[VideoConfig] = None):
@@ -258,9 +266,22 @@ class SP1VideoPipeline:
         Initialize the video pipeline.
         
         Args:
-            pipeline: Initialized SP1Pipeline instance
+            pipeline: An INSTANCE of SP1Pipeline (not the module!)
             config: Video processing configuration
         """
+        # Validate that pipeline is an instance, not a module
+        if not hasattr(pipeline, 'detect'):
+            raise TypeError(
+                "ERROR: 'pipeline' must be an INSTANCE of SP1Pipeline, not the module!\n\n"
+                "Correct usage:\n"
+                "    from src.pipeline import SP1Pipeline\n"
+                "    pipeline = SP1Pipeline(device='cuda:0')  # Create instance\n"
+                "    video_pipeline = SP1VideoPipeline(pipeline, config)\n\n"
+                "Wrong usage:\n"
+                "    from src import pipeline  # This imports the MODULE\n"
+                "    video_pipeline = SP1VideoPipeline(pipeline, config)  # This fails!"
+            )
+        
         self.pipeline = pipeline
         self.config = config or VideoConfig()
         self.renderer = VideoOverlayRenderer(self.config)
@@ -295,7 +316,7 @@ class SP1VideoPipeline:
         
         print(f"[SP1 Video] Source opened: {props['width']}x{props['height']} @ {props['fps']:.1f} FPS")
         if props['total_frames'] > 0:
-            duration = props['total_frames'] / props['fps']
+            duration = props['total_frames'] / max(props['fps'], 1)
             print(f"[SP1 Video] Duration: {duration:.1f}s ({props['total_frames']} frames)")
         
         return True, props
@@ -326,7 +347,7 @@ class SP1VideoPipeline:
         # Convert BGR -> RGB for pipeline
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        # Run SP1 pipeline
+        # Run SP1 pipeline - call detect() method on the pipeline INSTANCE
         result = self.pipeline.detect(frame_rgb, self.config.detection_classes)
         
         # Render overlays (keep BGR for OpenCV)
@@ -441,10 +462,14 @@ class SP1VideoPipeline:
         
         # Warmup
         print("[SP1 Video] Warming up...")
-        for _ in range(self.config.warmup_frames):
+        warmup_count = 0
+        while warmup_count < self.config.warmup_frames:
             ret, frame = self.cap.read()
             if ret:
                 _ = self.process_frame(frame)
+                warmup_count += 1
+            else:
+                break
         
         # Reset for actual processing
         if total_frames > 0:
@@ -454,6 +479,7 @@ class SP1VideoPipeline:
         
         print("[SP1 Video] Processing...\n")
         paused = False
+        result = None
         
         try:
             while self.is_running:
@@ -514,7 +540,7 @@ class SP1VideoPipeline:
                     if key == ord('q'):
                         print("\n[SP1 Video] Quit requested")
                         break
-                    elif key == ord('s'):
+                    elif key == ord('s') and result is not None:
                         path = f"screenshot_{self.frame_count:06d}.png"
                         cv2.imwrite(path, result.annotated_frame)
                         print(f"[SP1 Video] Saved: {path}")
